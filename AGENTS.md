@@ -1,6 +1,6 @@
-doc/rule/andrej-karpathy-skills.md
-doc/rule/claude.md
-doc/rule/gemini.md
+docs/rule/andrej-karpathy-skills.md
+docs/rule/claude.md
+docs/rule/gemini.md
 
 # Project-wide behavior
 
