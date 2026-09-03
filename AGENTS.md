@@ -1,7 +1,3 @@
-docs/rule/andrej-karpathy-skills.md
-docs/rule/claude.md
-docs/rule/gemini.md
-
 # Project-wide behavior
 
 ## 1. Be a good software engineer
@@ -221,3 +217,36 @@ Log only what's necessary for debugging. Avoid noisy logs that clutter the conso
 ### 10.3 Remove debug code before production
 
 Never commit debug logs or temporary console statements to main.
+
+## 11. Database schema management
+
+### 11.1 NEVER write SQL directly in code
+
+- No `CREATE TABLE`, `ALTER TABLE`, `DROP TABLE` in source code
+- No inline SQL in `initDatabase()` or any other function
+- Never modify `migrations/*.sql` files manually
+
+### 11.2 Schema change procedure (mandatory)
+
+When changing DB schema, always follow this order:
+
+1. **Edit TypeScript schema file** in `src/core/db/schema/` using `drizzle-orm/sqlite-core` API
+2. **Generate migration SQL**: `npm run db:generate`
+3. **Review generated SQL** in `migrations/` directory
+4. **Apply to local DB** (optional): `npm run db:migrate`
+5. **Build**: `npm run build` (copies migrations to `dist-electron/migrations/`)
+
+### 11.3 Reference
+
+See `docs/guide/migrations.md` for detailed explanation of the migration system.
+
+---
+
+## Behavioral Guidelines
+
+See `docs/rule/andrej-karpathy-skills.md` for core behavioral rules:
+
+- **Think Before Coding** — State assumptions, ask when uncertain, push back on overcomplication
+- **Simplicity First** — Minimum code that solves the problem. No speculative features.
+- **Surgical Changes** — Touch only what's needed. Don't refactor adjacent code.
+- **Goal-Driven Execution** — Define success criteria before implementation. Verify before claiming done.
