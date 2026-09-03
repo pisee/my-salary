@@ -47,16 +47,13 @@ my-salary/
 ├── src/
 │   ├── core/                  # [독립 도메인 엔진] UI/Electron 의존성 없는 순수 비즈니스 로직
 │   │   ├── db/                # SQLite (better-sqlite3) + Drizzle ORM
-│   │   │   ├── schema/        # 사원, 워크센터, 근태, 4대보험, 급여명세 스키마
-│   │   │   └── client.ts      # DB 초기화 및 트랜잭션 클라이언트
-│   │   ├── parsers/           # 출퇴근 raw 파일 및 4대보험 엑셀 파서
+│   │   │   └── schema/        # 사원, 워크센터, 근태, 4대보험, 급여명세 스키마
 │   │   ├── calculators/       # 연봉직/생산직 급여 및 수당 산출 엔진
-│   │   ├── validators/        # 근태 이상치 및 연장근무 한도 검증 엔진
-│   │   └── exporters/         # 위아고/은행/미국 리포트 엑셀 생성기
+│   │   └── validators/        # 근태 이상치 및 연장근무 한도 검증 엔진
 │   ├── main/                  # Electron Main Process (IPC 핸들러, 창 라이프사이클)
-│   │   ├── ipc/               # DB 조회, 파일 다이얼로그 IPC 핸들러
-│   │   └── index.ts           # 데스크톱 윈도우 생성 및 초기화
+│   │   └── index.ts           # 데스크톱 윈도우 생성, DB 초기화, IPC 핸들러 등록
 │   ├── preload/               # Electron Preload Scripts (ContextBridge 타입 안전 브릿지)
+│   │   └── index.ts
 │   ├── renderer/              # Vite + React 18 + TypeScript + TailwindCSS 데스크톱 UI
 │   │   ├── src/
 │   │   │   ├── components/    # 사이드바, 헤더, 공통 UI 컴포넌트
@@ -64,15 +61,39 @@ my-salary/
 │   │   │   ├── App.tsx
 │   │   │   └── main.tsx
 │   │   └── index.html
-│   └── shared/                # Main과 Renderer가 공유하는 Interface 및 상수
-│       ├── types/             # 공통 DTO 및 인터페이스 정의
-│       └── constants/         # 급여 계산 상수 및 워크센터 코드
+│   ├── shared/                # Main과 Renderer가 공유하는 Interface 및 상수
+│   │   └── types.ts           # 공통 DTO 및 인터페이스 정의
+│   └── assets/                # 전역 CSS
+│       └── index.css
+├── migrations/                # Drizzle 마이그레이션 SQL 파일
+├── docs/
+│   ├── guide/                 # 가이드 문서
+│   │   └── migrations.md      # DB 마이그레이션 시스템 설명
+│   ├── rule/                  # 개발 규칙
+│   │   └── andrej-karpathy-skills.md
+│   └── toubleshoting/         # 트러블슈팅 가이드
+│       └── toubleshoting.md
 ├── tests/                     # Vitest 자동화 단위/통합 테스트 스위트
-├── drizzle.config.ts          # Drizzle ORM 설정
-├── electron-builder.yml       # Windows 인스톨러(.exe) 빌드 설정
-├── vite.config.ts             # Vite + Electron 번들러 설정
+├── drizzle.config.mjs         # Drizzle Kit 설정
+├── vite.config.mjs            # Vite + Electron 번들러 설정
 ├── tsconfig.json              # TypeScript 컴파일러 설정
+├── AGENTS.md                  # AI 코드 에이전트 프로젝트 규칙
+├── CLAUDE.md                  # Claude Code 전용 규칙
+├── .cursorrules               # Cursor 전용 규칙
 └── package.json
+```
+
+### 빌드 출력 구조
+
+```text
+dist/                          # Renderer (HTML, JS, CSS)
+dist-electron/
+  index.mjs                    # Main Process (ESM + createRequire)
+  preload/
+    index.mjs                  # Preload (ESM)
+  schema/
+    index.cjs                  # DB Schema (CJS)
+  migrations/                  # 마이그레이션 SQL (빌드 시 자동 복사)
 ```
 
 ---
@@ -81,10 +102,11 @@ my-salary/
 
 | 구분 | 기술 / 라이브러리 | 용도 |
 | :--- | :--- | :--- |
-| **Runtime** | Electron (v34) | 로컬 PC 독립 실행 데스크톱 환경 |
+| **Runtime** | Electron **33.3.1** | 로컬 PC 독립 실행 데스크톱 환경 (내장 Node.js v20.19.1) |
 | **Frontend** | React 18, TypeScript, TailwindCSS, Lucide Icons | 모던 다크/라이트 대시보드 UI |
-| **Build Tool** | Vite 6, `vite-plugin-electron` | 고속 HMR 개발 환경 및 메인/렌더러 일괄 번들링 |
+| **Build Tool** | Vite 6 (렌더러), esbuild (메인/스키마) | 고속 HMR 개발 환경 및 메인/렌더러/스키마 번들링 |
 | **Local Database** | SQLite (`better-sqlite3`), Drizzle ORM | 단일 파일 기반 로컬 ACID DB 및 타입 안전 쿼리 |
+| **DB Migration** | Drizzle Kit | TypeScript 스키마 기반 마이그레이션 SQL 자동 생성 |
 | **Excel Processing** | `exceljs`, `xlsx` (SheetJS) | 템플릿 서식/수식 보존 및 고속 엑셀 파싱 |
 | **Testing** | Vitest | 비즈니스 로직 및 DB 스키마 100% 자동화 단위 테스트 |
 | **Packaging** | `electron-builder` | Windows 단독 설치 파일(`.exe` / NSIS) 생성 |
@@ -94,9 +116,53 @@ my-salary/
 ## 💻 4. 개발 환경 구성 방법 (Setup)
 
 ### 사전 요구사항 (Prerequisites)
-- **Node.js**: v18.0.0 이상 권장
+- **Node.js**: v20.0.0 ~ v22.x (권장: v22.22.0)
 - **npm**: v9.0.0 이상
 - **OS**: Windows 10/11 (또는 macOS, Linux)
+
+### 개발 환경 호환성 (Compatibility)
+
+| 구성 요소 | 버전 | 비고 |
+|-----------|------|------|
+| **Node.js (시스템)** | v20 ~ v22 | `better-sqlite3` 네이티브 모듈 빌드용. Electron과 독립적 |
+| **Electron** | **33.3.1** (강제) | 34.x 이상은 ESM-first 변경으로 `require('electron')` 불가. 반드시 33.x 사용 |
+| **Electron 내부 Node.js** | v20.19.1 | Electron 33.x 번들링 버전. 메인 프로세스 실행 환경 |
+| **better-sqlite3** | v11.8.1 | CJS 전용 네이티브 모듈. 시스템 Node.js로 빌드됨 |
+| **drizzle-orm** | v0.38.4 | `"type": "module"` (ESM 전용). CJS `createRequire`로 간접 로딩 |
+| **Vite** | v6.1.0 | 렌더러 번들링. 메인/스키마는 esbuild 직접 사용 |
+
+#### ⚠️ Electron 버전 주의사항
+
+- **Electron 34.x 이상은 사용 금지**: `require('electron')`이 내장 모듈 대신 npm 패키지 경로 문자열을 반환하며, `import`는 ESM→CJS interop 충돌(`cjsPreparseModuleExports`)을 발생시킵니다.
+- **Electron 33.x는 `require('electron')`이 정상 동작**하므로, `better-sqlite3`(CJS 전용) 및 `drizzle-orm`(ESM 전용)과 함께 `createRequire` 패턴으로 안정적으로 혼합 로딩이 가능합니다.
+
+#### ⚠️ better-sqlite3 네이티브 모듈
+
+- `npm install` 시 시스템 Node.js 버전에 맞춰 네이티브 바이너리 컴파일됩니다.
+- Node.js v20 ~ v22 범위 내에서 빌드된 바이너리는 Electron 33.x 내부 Node.js(v20.19.1)와 ABI 호환됩니다.
+- Node.js v24 이상으로 업그레이드하면 ABI 불일치로 Electron 내부에서 `better-sqlite3` 로딩 실패할 수 있습니다.
+- `npm run build` 시 `@electron/rebuild`가 자동으로 better-sqlite3를 Electron 내부 Node.js에 맞춰 리빌드합니다.
+
+#### ⚠️ Electron 바이너리 다운로드 타임아웃 (한국 네트워크)
+
+`npm install` 시 Electron 바이너리 다운로드가 타임아웃(`ETIMEDOUT 20.200.245.247:443`)될 수 있습니다.
+
+```bash
+# 1. --ignore-scripts로 패키지 설치 (바이너리 다운로드 생략)
+npm install --ignore-scripts
+```
+
+바이너리가 누락된 경우 수동 설치:
+
+```bash
+# 1. Electron 33.3.1 ZIP 다운로드
+#    https://github.com/electron/electron/releases/download/v33.3.1/electron-v33.3.1-win32-x64.zip
+
+# 2. 압축 해제 후 node_modules/electron/dist/ 에 전체 복사
+
+# 3. path.txt 생성 (내용: electron.exe, 줄바꿈 없음)
+echo -n "electron.exe" > node_modules/electron/path.txt
+```
 
 ### 설치 (Installation)
 ```bash
@@ -104,7 +170,7 @@ my-salary/
 git clone https://github.com/pisee/my-salary.git
 cd my-salary
 
-# 2. 의존성 패키지 설치
+# 2. 의존성 패키지 설치 (타임아웃 시 --ignore-scripts 옵션 사용)
 npm install
 ```
 
@@ -119,6 +185,7 @@ npm run dev
 - Vite 개발 서버와 함께 **Electron 데스크톱 창이 즉시 실행**됩니다.
 - React UI 코드(`src/renderer`) 수정 시 실시간 HMR(Hot Module Replacement)로 즉시 화면에 반영됩니다.
 - 메인/프리로드 코드(`src/main`, `src/preload`) 수정 시에도 자동으로 리빌드되어 일렉트론 창에 적용됩니다.
+- 메인 프로세스 로그는 터미널에 `[Main]` prefix 로 출력됩니다.
 
 ### 2) 코어 비즈니스 로직 단위 테스트 실행
 ```bash
@@ -140,7 +207,9 @@ npm run build
 ```
 - TypeScript 타입 검사(`tsc`) 수행
 - React 프론트엔드 번들링 (`dist/`)
-- Electron Main 및 Preload 번들링 (`dist-electron/`)
+- Electron Main, Preload, Schema 번들링 (`dist-electron/`)
+- 마이그레이션 SQL 복사 (`dist-electron/migrations/`)
+- `better-sqlite3` 네이티브 모듈 리빌드 (Electron ABI 호환)
 
 ### 2) 빌드된 결과물로 앱 로컬 구동
 ```bash
@@ -159,7 +228,37 @@ npm run pack
 
 ---
 
-## 📂 7. 관련 사양 및 설계 문서
+## 🗄️ 7. 데이터베이스 마이그레이션
 
-- [상세 아키텍처 설계 사양서 (Design Spec)](docs/superpowers/specs/2026-08-30-salary-attendance-automation-design.md)
-- [Phase 1 구현 계획서 (Implementation Plan)](docs/superpowers/plans/2026-08-30-phase1-boilerplate.md)
+DB 스키마 변경 시 SQL 을 직접 작성하지 않고 **Drizzle ORM 마이그레이션**을 사용합니다.
+
+### 명령어
+
+```bash
+# 스키마 변경 후 마이그레이션 SQL 생성
+npm run db:generate
+
+# 로컬 DB 에 마이그레이션 적용 (선택)
+npm run db:migrate
+```
+
+### 워크플로우
+
+1. `src/core/db/schema/` 의 TypeScript 스키마 파일 수정
+2. `npm run db:generate` 실행 → `migrations/` 에 새 SQL 파일 생성
+3. `npm run db:migrate` 실행 (선택, 빠른 확인용)
+4. `npm run build` 실행 → 마이그레이션 SQL 이 `dist-electron/migrations/` 에 자동 복사
+5. 앱 실행 시 마이그레이션 자동 적용
+
+> 자세한 내용은 [DB 마이그레이션 가이드](docs/guide/migrations.md)를 참조하세요.
+
+---
+
+## 📂 8. 관련 문서
+
+| 문서 | 설명 |
+|------|------|
+| [상세 아키텍처 설계 사양서](docs/superpowers/specs/2026-08-30-salary-attendance-automation-design.md) | 시스템 설계 전체 사양 |
+| [Phase 1 구현 계획서](docs/superpowers/plans/2026-08-30-phase1-boilerplate.md) | 초기 보일러플레이트 구현 계획 |
+| [DB 마이그레이션 가이드](docs/guide/migrations.md) | Drizzle ORM 마이그레이션 시스템 상세 설명 |
+| [트러블슈팅 가이드](docs/toubleshoting/toubleshoting.md) | 설치/빌드/실행 중 발생한 오류 및 해결 방법 |
