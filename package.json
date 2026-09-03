@@ -3,17 +3,18 @@
   "version": "1.0.0",
   "description": "Salary and Attendance Automation Desktop Application",
   "type": "module",
-  "main": "dist-electron/main/index.js",
+  "main": "dist-electron/index.mjs",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
-    "start": "electron .",
+    "rebuild": "npx @electron/rebuild -f -o better-sqlite3 -w better-sqlite3",
+    "build": "tsc && vite build && npm run rebuild",
+    "start": "node_modules\\electron\\dist\\electron.exe dist-electron/index.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "pack": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder",
-    "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate"
+    "db:generate": "npx drizzle-kit generate --config=drizzle.config.mjs",
+    "db:migrate": "node -e \"const{Database}=require('better-sqlite3');const{drizzle}=require('drizzle-orm/better-sqlite3');const{migrate}=require('drizzle-orm/better-sqlite3/migrator');const db=new Database('data/payroll.db');migrate(drizzle(db),{migrationsFolder:'./migrations'})\""
   },
   "dependencies": {
     "better-sqlite3": "^11.8.1",
@@ -28,14 +29,16 @@
     "zustand": "^5.0.3"
   },
   "devDependencies": {
+    "@electron/rebuild": "^4.2.0",
     "@types/better-sqlite3": "^7.6.12",
     "@types/node": "^22.13.4",
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.20",
-    "drizzle-kit": "^0.30.4",
-    "electron": "^34.2.0",
+    "concurrently": "^10.0.5",
+    "drizzle-kit": "^0.31.10",
+    "electron": "^33.3.1",
     "electron-builder": "^25.1.8",
     "postcss": "^8.5.2",
     "tailwindcss": "^3.4.17",
