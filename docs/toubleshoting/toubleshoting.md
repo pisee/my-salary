@@ -2,18 +2,61 @@
 
 ## 1. npm install
 
-### 오류: Electron 바이너리 다운로드 타임아웃
+### 오류: Electron 바이너리가 설치되지 않음
+
 ```
-ETIMEDOUT 20.200.245.247:443
+Error: Electron failed to install correctly, please delete node_modules/electron and try installing again
 ```
 
-**해결:** `--ignore-scripts` 옵션으로 설치 후 Electron 바이너리 수동 다운로드
-```bash
-npm install --ignore-scripts
+`npm run dev` / `npm start` 시 발생. `node_modules/electron/` 에 `dist/` 와
+`path.txt` 가 없으면 postinstall 다운로드가 실패한 것이다.
+
+**원인:** `@electron/get` 5.x 는 `got` 대신 Node 전역 `fetch`(undici)를 사용한다.
+undici 는 npm 의 `proxy` / `strict-ssl=false` 설정을 따르지 않으므로 사내 프록시
+구간에서 TLS 검증이 실패한다.
+
 ```
-- URL: `https://github.com/electron/electron/releases/download/v33.3.1/electron-v33.3.1-win32-x64.zip`
-- 압축 해제 후 `node_modules/electron/dist/` 에 전체 복사
-- `node_modules/electron/path.txt` 파일 생성 (내용: `electron.exe`, 줄바꿈 없음)
+TypeError: fetch failed
+  → Error: CA certificate key too weak (UNSPECIFIED)
+```
+
+프록시가 제시하는 CA 키가 Node 24 OpenSSL 기본 보안 레벨(≥112비트)에 미달한다.
+npm 자체는 `strict-ssl=false` 로 우회되므로 `npm install` 은 성공하고 Electron
+바이너리만 조용히 누락된다.
+
+**해결 (권장): `@electron/get` 캐시에 바이너리를 미리 넣는다.**
+curl 은 Windows 인증서 저장소를 사용하므로 같은 프록시에서 정상 동작한다. 캐시에
+있으면 이후 모든 `npm install` 이 네트워크 없이 cache hit 으로 처리된다.
+
+```bash
+# 캐시 디렉터리명 = sha256(릴리스 URL 의 디렉터리 부분)
+VER=44.3.0
+BASE="https://github.com/electron/electron/releases/download/v$VER"
+CACHE="$LOCALAPPDATA/electron/Cache/$(node -e "
+const c=require('crypto'),p=require('path');
+const u=new URL('$BASE/electron-v$VER-win32-x64.zip');
+u.hash='';u.search='';u.pathname=p.posix.dirname(u.pathname);
+process.stdout.write(c.createHash('sha256').update(u.toString()).digest('hex'));")"
+
+mkdir -p "$CACHE"
+export https_proxy=http://70.10.15.10:8080 http_proxy=http://70.10.15.10:8080
+curl -sSL -o "$CACHE/SHASUMS256.txt" "$BASE/SHASUMS256.txt"
+curl -L  -o "$CACHE/electron-v$VER-win32-x64.zip" "$BASE/electron-v$VER-win32-x64.zip"
+
+node node_modules/electron/install.js   # → "Cache hit", dist/ + path.txt 생성
+```
+
+**대안:** TLS 검증을 끄고 postinstall 을 직접 실행한다. 인증서 검증을 무력화하므로
+이 단계에서만 사용할 것.
+
+```bash
+NODE_TLS_REJECT_UNAUTHORIZED=0 ELECTRON_GET_USE_PROXY=true   HTTPS_PROXY=http://70.10.15.10:8080 HTTP_PROXY=http://70.10.15.10:8080   node node_modules/electron/install.js
+```
+
+**확인:**
+```bash
+node_modules/electron/dist/electron.exe --version   # v44.3.0
+```
 
 ---
 
@@ -29,75 +72,27 @@ npm install --ignore-scripts
 ### 오류 2: `Cannot find module 'dist-electron/main/index.js'`
 **원인:** `package.json`의 `main` 경로 불일치
 
-**해결:** 빌드 출력 경로와 일치하도록 수정
-
----
-
-### 오류 3: Electron 34.x ESM-first 문제
-**원인:** Electron 34.x에서 `require('electron')`는 npm 패키지(string)를 반환하고, `import`는 ESM→CJS interop 충돌 발생
-
-**해결:** Electron 33.x로 다운그레이드
-- `package.json`: `"electron": "^33.3.1"`
-- 33.x에서는 `require('electron')`이 내장 모듈을 정상 반환
-
----
-
-### 오류 4: Schema CJS 빌드가 빈 객체 `{}` 반환
-**원인 1:** esbuild의 `__toCommonJS` 패턴이 변수 초기화 전에 `module.exports` 할당
-**원인 2:** `package.json`에 `"type": "module"` 설정으로 `.js` 파일이 ESM로 파싱됨
-
-**해결:**
-- Schema를 `.cjs` 확장자로 출력 (esbuild 빌드 후 `.js` → `.cjs` rename)
-- `__toCommonJS` 패턴 제거 후 명시적 `module.exports = { ... }` 추가
-
----
-
-### 오류 5: `Cannot read properties of undefined (reading 'exports')` at cjsPreparseModuleExports
-**원인:** ESM `.mjs` 파일에서 `import { ipcMain } from "electron"` 시, `electron` npm 패키지가 CJS-only (string export)여서 ESM→CJS interop 충돌
-
-**해결:** Electron 33.x로 다운그레이드 + `createRequire` 사용
-
----
-
-### 오류 6: CJS 빌드에 `import.meta` / `export default` 포함
-**원인:** `import.meta.url`은 CJS에서 사용 불가, `vite-plugin-electron`이 CJS 빌드에 ESM 코드 주입
-
-**해결:** esbuild로 직접 빌드 (Vite plugin 대신)
+**해결:** 빌드 출력 경로와 일치하도록 수정 (`dist-electron/index.mjs`)
 
 ---
 
 ## 3. npm start
 
-### 오류 1: `Cannot read properties of undefined (reading 'exports')` at cjsPreparseModuleExports
-**원인:** `drizzle-orm/sqlite-core` CJS 파일의 `__toCommonJS` 패턴이 ESM→CJS interop에서 충돌
+### 오류 1: `spawn electron.exe ENOENT`
+**원인:** `node_modules/electron/dist/` 가 없다. postinstall 다운로드가 실패한 상태.
 
-**해결:**
-- `drizzle-orm`, `drizzle-orm/*`를 Vite external로 설정
-- Main process에서 `createRequire`를 사용하여 `require('drizzle-orm/better-sqlite3')`로 로딩
-- Schema는 `require('./schema/index.cjs')`로 로딩
+**해결:** §1 참고 (캐시에 바이너리를 넣고 `node node_modules/electron/install.js` 실행)
 
 ---
 
-### 오류 2: `spawn electron.exe ENOENT`
-**원인:** `npm install` 시 Electron 바이너리 삭제됨
+### 오류 2: sql.js WASM 파일 로드 실패
+```
+Error: Cannot find module 'sql.js'
+```
 
-**해결:** Electron 바이너리 수동 다운로드 후 `node_modules/electron/dist/` 에 전체 복사
+**원인:** sql.js 의 WASM 파일(`sql-wasm.wasm`) 이 `node_modules/sql.js/dist/` 에 없음
 
----
-
-### 오류 3: `Cannot read properties of undefined (reading 'whenReady')`
-**원인:** Electron 34.x에서 `require('electron')`이 npm 패키지(string) 반환  
-https://github.com/electron/electron/releases/download/v34.5.8/electron-v34.5.8-win32-x64.zip
-
-**해결:** Electron 33.x로 다운그레이드  
-https://github.com/electron/electron/releases/download/v33.3.1/electron-v33.3.1-win32-x64.zip
-
----
-
-### 오류 4: `export default` SyntaxError in CJS
-**원인:** `vite-plugin-electron-renderer`가 CJS 빌드에 ESM `export default` 주입
-
-**해결:** `vite-plugin-electron` 제거 후 esbuild로 직접 빌드
+**해결:** `npm install` 로 sql.js 패키지가 정상 설치되었는지 확인
 
 ---
 
@@ -106,17 +101,49 @@ https://github.com/electron/electron/releases/download/v33.3.1/electron-v33.3.1-
 ```
 dist/                          # Renderer (HTML, JS, CSS)
 dist-electron/
-  index.mjs                    # Main process (ESM + createRequire)
+  index.mjs                    # Main process (순수 ESM)
   preload/
     index.mjs                  # Preload (ESM)
-  schema/
-    index.cjs                  # DB Schema (CJS)
+  migrations/
+    0000_curvy_hawkeye.sql     # 마이그레이션 SQL (빌드 시 자동 복사)
 ```
 
 ## 핵심 변경사항
 
 | 파일 | 변경 내용 |
 |------|----------|
-| `package.json` | `electron@33.3.1`, `"main": "dist-electron/index.mjs"` |
-| `vite.config.mjs` | esbuild로 main/preload/schema 직접 빌드, `drizzle-orm` external |
-| `src/main/index.ts` | `createRequire`로 `electron`, `better-sqlite3`, `drizzle-orm` 로딩 |
+| `package.json` | `electron@44.3.0`, `sql.js` 추가, `better-sqlite3` 제거, `@electron/rebuild` 제거 |
+| `vite.config.mjs` | esbuild로 main/preload 직접 빌드, schema CJS 빌더 제거, `sql.js` external |
+| `src/main/index.ts` | 순수 ESM import (`electron`, `sql.js`, `drizzle-orm/sql.js`), `createRequire` 제거 |
+
+## 주요 아키텍처 변경
+
+### better-sqlite3 → sql.js (WASM) 교체
+
+| 항목 | 변경 전 | 변경 후 |
+|------|---------|---------|
+| **DB 엔진** | `better-sqlite3` (CJS 네이티브) | `sql.js` (WASM, ESM) |
+| **빌드 고통** | `electron-rebuild` 필수 | **불필요** |
+| **ESM 호환성** | `createRequire` 필요 | **순수 `import`** |
+| **마이그레이션** | `drizzle-orm/better-sqlite3/migrator` | 수동 SQL 실행 (앱 시작 시) |
+
+### Electron 33.x → 44.x 업그레이드
+
+| 항목 | 변경 전 | 변경 후 |
+|------|---------|---------|
+| **Electron** | 33.3.1 (Node v20.19.1) | **44.3.0** (Node v24.20.0, Chromium 152) |
+| **import from electron** | `createRequire` 필요 | **순수 `import`** |
+| **esbuild target** | node20 | **node24** |
+| **@types/node** | ^22.13.4 | **^24.13.4** |
+| **바이너리 설치** | `postinstall` 자동 | **`install-electron` 명시 실행** (43+ 에서 스크립트 제거됨) |
+
+### 삭제된 패키지
+
+- `better-sqlite3`, `@types/better-sqlite3` — WASM 기반 sql.js 로 교체
+- `@electron/rebuild` — 네이티브 리빌드 불필요
+- `concurrently` — 미사용
+- `autoprefixer` — TailwindCSS 4 가 벤더 프리픽스를 내장 처리
+
+### 삭제된 빌드 산출물
+
+- `dist-electron/schema/` — CJS 스키마 번들 불필요 (마이그레이션 SQL 만 사용)
