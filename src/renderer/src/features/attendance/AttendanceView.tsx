@@ -14,8 +14,8 @@ export function AttendanceView() {
         <label className="flex flex-col items-center justify-center w-full h-48 border-2 border-dashed border-slate-700 rounded-lg cursor-pointer hover:border-slate-600 hover:bg-slate-800/50 transition-colors">
           <Upload className="w-8 h-8 text-slate-500 mb-3" />
           <span className="text-sm text-slate-400">엑셀 파일을 드래그하거나 클릭하여 선택하세요</span>
-          <span className="text-xs text-slate-600 mt-1">.xlsx, .xls, .csv</span>
-          <input type="file" className="hidden" accept=".xlsx,.xls,.csv" />
+          <span className="text-xs text-slate-600 mt-1">.xlsx, .csv</span>
+          <input type="file" className="hidden" accept=".xlsx,.csv" />
         </label>
       </div>
     </div>
