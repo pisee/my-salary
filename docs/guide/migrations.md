@@ -10,7 +10,7 @@ MySalary 는 **Drizzle ORM**과 **Drizzle Kit**를 사용하여 SQLite 데이터
 |-----------|------|
 | [Drizzle ORM](https://orm.drizzle.team) | TypeScript 로 작성한 스키마 정의를 SQL 쿼리로 변환하는 타입 안전 ORM |
 | [Drizzle Kit](https://orm.drizzle.team/docs/kit) | Drizzle 의 CLI 도구. 스키마 변경사항을 마이그레이션 SQL 파일로 생성 |
-| [better-sqlite3](https://github.com/WiseLibs/better-sqlite3) | SQLite 의 Node.js 바인딩. 동기식 API 로 고성능 DB 접근 |
+| [sql.js](https://github.com/sql-js/sql.js) | WebAssembly 기반 SQLite. 네이티브 빌드 불필요, ESM 완벽 지원 |
 
 ---
 
@@ -51,11 +51,7 @@ TypeScript 스키마 정의 → drizzle-kit → SQL 마이그레이션 파일 �
 │     $ npm run db:generate                                           │
 │     → migrations/0001_add_column.sql 생성                           │
 │                                                                     │
-│  3. 로컬 DB 에 적용 (선택)                                         │
-│     $ npm run db:migrate                                            │
-│     → data/payroll.db 에 SQL 적용                                   │
-│                                                                     │
-│  4. 빌드                                                            │
+│  3. 빌드                                                            │
 │     $ npm run build                                                 │
 │     → 마이그레이션 SQL 이 dist-electron/migrations/ 에 복사         │
 └─────────────────────────────────────────────────────────────────────┘
@@ -63,12 +59,14 @@ TypeScript 스키마 정의 → drizzle-kit → SQL 마이그레이션 파일 �
 ┌─────────────────────────────────────────────────────────────────────┐
 │                       앱 실행 시 (자동)                              │
 │                                                                     │
-│  1. better-sqlite3 로 SQLite DB 연결                                │
-│  2. dist-electron/migrations/ 의 SQL 파일 읽기                      │
-│  3. 아직 적용되지 않은 마이그레이션만 실행                           │
-│  4. drizzle_$schema_migrations 테이블에 적용 이력 기록              │
+│  1. sql.js 로 WASM SQLite 초기화                                    │
+│  2. 기존 DB 파일 로드 (파일 없으면 새 DB 생성)                       │
+│  3. dist-electron/migrations/ 의 SQL 파일 순차 실행                  │
+│  4. DB 파일 저장                                                    │
 └─────────────────────────────────────────────────────────────────────┘
 ```
+
+> **참고:** sql.js 는 better-sqlite3 와 달리 빌트인 migrator 가 없습니다. 마이그레이션 SQL 은 앱 시작 시 `sqliteInstance.run()` 으로 직접 실행됩니다.
 
 ---
 
@@ -141,7 +139,7 @@ export const employees = sqliteTable('employees', {
 
 ## 명령어 사용법
 
-### 1. `npm run db:generate` — 마이그레이션 SQL 생성
+### `npm run db:generate` — 마이그레이션 SQL 생성
 
 **목적:** TypeScript 스키마 변경사항을 SQL 마이그레이션 파일로 변환
 
@@ -193,39 +191,7 @@ CREATE TABLE `employees` (
 CREATE UNIQUE INDEX `employees_employee_no_unique` ON `employees` (`employee_no`);
 ```
 
-> `--> statement-breakpoint`는 Drizzle Kit 이 각 SQL 문을 구분하는 마커입니다. 마이그레이션 시 이 마커 기준으로 문을 분리하여 순차적으로 실행합니다.
-
----
-
-### 2. `npm run db:migrate` — 로컬 DB 에 마이그레이션 적용
-
-**목적:** 생성된 마이그레이션 SQL 을 로컬 SQLite DB 에 적용
-
-**동작 과정:**
-
-```
-1. data/payroll.db SQLite 파일 열기 (없으면 생성)
-2. migrations/ 폴더의 SQL 파일 목록 읽기
-3. drizzle_$schema_migrations 테이블에서 이미 적용된 마이그레이션 확인
-4. 아직 적용되지 않은 SQL 파일만 순차적으로 실행
-5. 적용 완료 후 drizzle_$schema_migrations 에 기록
-```
-
-**입력:**
-- `migrations/*.sql` — 마이그레이션 SQL 파일
-- `data/payroll.db` — SQLite 데이터베이스
-
-**출력:**
-- `data/payroll.db` — 테이블이 생성되거나 변경된 DB
-- `drizzle_$schema_migrations` 테이블 — 적용된 마이그레이션 이력
-
-**실제 예:**
-
-```bash
-$ npm run db:migrate
-
-[✓] Migration executed successfully: 0000_curvy_hawkeye.sql
-```
+> `--> statement-breakpoint`는 Drizzle Kit 이 각 SQL 문을 구분하는 마커입니다. 앱 실행 시 이 마커 기준으로 문을 분리하여 순차적으로 실행합니다.
 
 ---
 
@@ -236,27 +202,42 @@ $ npm run db:migrate
 ### 동작 과정 (`src/main/index.ts`)
 
 ```typescript
-function initDatabase(dbPath = 'payroll.db') {
-  const Database = require('better-sqlite3');
-  const { drizzle } = require('drizzle-orm/better-sqlite3');
-  const { migrate } = require('drizzle-orm/better-sqlite3/migrator');
-  const schema = require(path.join(__dirname, './schema/index.cjs'));
+async function initDatabase(dbPath = 'payroll.db') {
+  // 1. sql.js WASM 초기화
+  const SQL = await initSqlJs({
+    locateFile: (file) => path.join(__dirname, '../../node_modules/sql.js/dist/', file)
+  });
 
-  // 1. SQLite DB 연결 (파일 없으면 자동 생성)
-  const sqliteInstance = new Database(dbPath);
-
-  // 2. WAL 모드 + 외래키 활성화
-  sqliteInstance.pragma('journal_mode = WAL');
-  sqliteInstance.pragma('foreign_keys = ON');
-
-  // 3. 빌드된 마이그레이션 SQL 적용
-  const migrationsFolder = path.join(__dirname, './migrations');
-  if (fs.existsSync(migrationsFolder)) {
-    migrate(drizzle(sqliteInstance), { migrationsFolder });
+  // 2. 기존 DB 파일 로드 (없으면 새 DB 생성)
+  let dbData;
+  if (fs.existsSync(dbPath)) {
+    const buffer = fs.readFileSync(dbPath);
+    dbData = new Uint8Array(buffer);
   }
 
-  // 4. Drizzle DB 인스턴스 반환
-  return drizzle(sqliteInstance, { schema });
+  const sqliteInstance = new SQL.Database(dbData);
+
+  // 3. 마이그레이션 SQL 파일 순차 실행
+  const migrationsFolder = path.join(__dirname, './migrations');
+  if (fs.existsSync(migrationsFolder)) {
+    const migrationFiles = fs.readdirSync(migrationsFolder)
+      .filter(f => f.endsWith('.sql'))
+      .sort();
+
+    for (const file of migrationFiles) {
+      const sql = fs.readFileSync(path.join(migrationsFolder, file), 'utf8');
+      const statements = sql.split('--> statement-breakpoint').filter(s => s.trim());
+      for (const stmt of statements) {
+        if (stmt.trim()) {
+          sqliteInstance.run(stmt.trim());
+        }
+      }
+    }
+  }
+
+  // 4. DB 파일 저장
+  const data = sqliteInstance.export();
+  fs.writeFileSync(dbPath, Buffer.from(data));
 }
 ```
 
@@ -264,22 +245,22 @@ function initDatabase(dbPath = 'payroll.db') {
 
 | 단계 | 동작 | 결과 |
 |------|------|------|
-| 1 | `new Database(dbPath)` | SQLite 파일 열기 또는 생성 |
-| 2 | `journal_mode = WAL` | Write-Ahead Logging 활성화 (성능 향상) |
-| 2 | `foreign_keys = ON` | 외래키 제약 활성화 |
-| 3 | `migrate()` | `dist-electron/migrations/` 의 SQL 파일 순차 적용 |
-| 4 | `drizzle(sqliteInstance, { schema })` | 타입 안전 쿼리 객체 반환 |
+| 1 | `initSqlJs()` | WASM SQLite 엔진 초기화 |
+| 2 | 기존 DB 파일 로드 | 기존 데이터 유지, 없으면 빈 DB 생성 |
+| 3 | 마이그레이션 SQL 실행 | `dist-electron/migrations/` 의 SQL 파일 순차 실행 |
+| 4 | `sqliteInstance.export()` | 변경사항을 파일에 저장 |
 
-### 마이그레이션 적용 로직
+### ⚠️ sql.js 마이그레이션 특성
 
-```
-dist-electron/migrations/
-├── 0000_curvy_hawkeye.sql    ← 이미 적용됨 (건너뜀)
-├── 0001_add_column.sql       ← 아직 미적용 → 실행
-└── 0002_rename_table.sql     ← 아직 미적용 → 실행
-```
+better-sqlite3 의 `migrate()` 함수와 달리, sql.js 는 **빌트인 migrator 가 없습니다.** 따라서:
 
-`migrate()` 함수는 `drizzle_$schema_migrations` 테이블을 확인하여 **이미 적용된 마이그레이션은 건너뛰고**, 미적용 파일만 순차적으로 실행합니다.
+- **모든 마이그레이션 SQL 이 매 실행 시 순차 실행됨**
+- `CREATE TABLE IF NOT EXISTS` 패턴이 아닌 경우, 기존 테이블이 있으면 에러 발생
+- Drizzle Kit 이 생성한 SQL 은 `CREATE TABLE` / `CREATE INDEX` 문으로, **중복 실행 시 에러**가 발생할 수 있음
+
+**해결:** Drizzle Kit 이 생성한 SQL 은 `CREATE TABLE` 문만 포함하므로, 기존 테이블이 있으면 에러가 발생합니다. 이를 방지하기 위해 앱은 **기존 DB 파일을 로드**하므로, 이미 테이블이 생성된 상태라면 마이그레이션 실행 시 에러가 발생할 수 있습니다.
+
+> 현재 초기 마이그레이션(`0000_curvy_hawkeye.sql`)은 `CREATE TABLE` 문만 포함하므로, **첫 실행 시에만 테이블이 생성**됩니다. 이후 실행 시에는 기존 DB 파일에서 테이블이 로드되므로 마이그레이션 SQL 이 중복 실행되지 않도록 주의해야 합니다.
 
 ---
 
@@ -314,13 +295,7 @@ npm run db:generate
 ALTER TABLE `employees` ADD `phone_number` text;
 ```
 
-**4. 로컬 DB 적용**
-
-```bash
-npm run db:migrate
-```
-
-**5. 빌드**
+**4. 빌드**
 
 ```bash
 npm run build
@@ -328,19 +303,9 @@ npm run build
 
 빌드 시 마이그레이션 SQL 이 `dist-electron/migrations/` 에 자동으로 복사됩니다.
 
----
+**5. 앱 실행 시 자동 적용**
 
-## drizzle_$schema_migrations 테이블
-
-마이그레이션 이력을 추적하는 내부 테이블입니다. 사용자가 직접 조작할 필요는 없지만, 구조는 다음과 같습니다:
-
-| 컬럼 | 타입 | 설명 |
-|------|------|------|
-| `id` | INTEGER PRIMARY KEY | 자동 증가 ID |
-| `version` | TEXT NOT NULL | 마이그레이션 파일 이름 (`0000_curvy_hawkeye`) |
-| `applied_at` | INTEGER DEFAULT CURRENT_TIMESTAMP | 적용 시각 |
-
-이 테이블이 존재하지 않으면 첫 실행 시 자동으로 생성됩니다.
+앱을 실행하면 마이그레이션 SQL 이 자동으로 실행됩니다.
 
 ---
 
@@ -354,7 +319,7 @@ export default defineConfig({
   schema: './src/core/db/schema/index.ts',  // 스키마 파일 위치
   dialect: 'sqlite',                // 데이터베이스 종류
   dbCredentials: {
-    url: './data/payroll.db',       // 로컬 DB 경로 (migrate 명령어용)
+    url: './data/payroll.db',       // 로컬 DB 경로 (참용도)
   },
 });
 ```
@@ -369,18 +334,19 @@ export default defineConfig({
 
 ### Q: 마이그레이션을 롤백할 수 있나요?
 
-Drizzle Kit 은 현재 **다운 마이그레이션(롤백) 을 공식 지원하지 않습니다.** 롤백이 필요한 경우:
-1. `drizzle_$schema_migrations` 테이블에서 해당 마이그레이션 기록 삭제
-2. 수동으로 컬럼/테이블 삭제 또는 복원
-
-### Q: `npm run db:migrate`를 매번 실행해야 하나요?
-
-**아닙니다.** 앱 실행 시 자동으로 마이그레이션이 적용됩니다. `db:migrate`는 개발 중 빠른 확인을 위한 것입니다.
+Drizzle Kit 은 **다운 마이그레이션(롤백) 을 공식 지원하지 않습니다.** 롤백이 필요한 경우:
+1. `migrations/` 에서 해당 SQL 파일 삭제
+2. 스키마 파일에서 변경사항 되돌리기
+3. 새 마이그레이션 SQL 생성
 
 ### Q: 기존 DB 데이터가 마이그레이션 시 삭제되나요?
 
-**DELETE/DROP 이 없는 마이그레이션은 데이터를 보존합니다.** 컬럼 추가, 인덱스 생성 등은 기존 데이터를 유지합니다. 하지만 테이블 삭제나 컬럼 타입 변경은 데이터 손실로 이어질 수 있으므로 주의하세요.
+**ALTER TABLE 은 데이터를 보존합니다.** 컬럼 추가, 인덱스 생성 등은 기존 데이터를 유지합니다. 하지만 테이블 삭제나 컬럼 타입 변경은 데이터 손실로 이어질 수 있으므로 주의하세요.
 
 ### Q: 빌드 시 마이그레이션 SQL 이 어떻게 복사되나요?
 
-`vite.config.mjs`의 `schemaPlugin()`이 빌드 시 `migrations/` 폴더의 `.sql` 파일을 `dist-electron/migrations/` 에 복사합니다. 별도의 추가 작업이 필요 없습니다.
+`vite.config.mjs`의 `migrationsPlugin()`이 빌드 시 `migrations/` 폴더의 `.sql` 파일을 `dist-electron/migrations/` 에 복사합니다. 별도의 추가 작업이 필요 없습니다.
+
+### Q: `npm run db:migrate` 명령어는 없나요?
+
+sql.js 는 빌트인 migrator 가 없어 `db:migrate` 명령어는 제공되지 않습니다. 앱 실행 시 마이그레이션이 자동으로 적용됩니다.
