@@ -36,20 +36,18 @@ npm run db:generate
 - `migrations/` 폴더에 새 SQL 파일 자동 생성
 - 생성된 SQL 파일 내용 반드시 확인
 
-### 3. 로컬 DB 적용 (선택, 빠른 확인용)
-
-```bash
-npm run db:migrate
-```
-
-### 4. 빌드
+### 3. 빌드
 
 ```bash
 npm run build
 ```
 
 - 빌드 시 마이그레이션 SQL 이 `dist-electron/migrations/` 에 자동 복사
+- 앱 실행 시 마이그레이션 자동 적용
 
-## 참고 문서
+## 참고
 
-자세한 내용은 `docs/guide/migrations.md` 참조.
+- 현재 DB 엔진은 **sql.js** (WASM 기반) 사용
+- sql.js 는 빌트인 migrator 가 없어 `npm run db:migrate` 명령어 없음
+- 마이그레이션은 앱 실행 시 `sqliteInstance.run()` 으로 직접 SQL 실행
+- 자세한 내용은 `docs/guide/migrations.md` 참조.
