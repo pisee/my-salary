@@ -5,47 +5,49 @@
   "type": "module",
   "main": "dist-electron/index.mjs",
   "scripts": {
+    "postinstall": "install-electron",
     "dev": "vite",
-    "rebuild": "npx @electron/rebuild -f -o better-sqlite3 -w better-sqlite3",
-    "build": "tsc && vite build && npm run rebuild",
-    "start": "node_modules\\electron\\dist\\electron.exe dist-electron/index.mjs",
+    "build": "tsc && vite build",
+    "start": "electron .",
     "test": "vitest run",
     "test:watch": "vitest",
     "pack": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder",
-    "db:generate": "npx drizzle-kit generate --config=drizzle.config.mjs",
-    "db:migrate": "node -e \"const{Database}=require('better-sqlite3');const{drizzle}=require('drizzle-orm/better-sqlite3');const{migrate}=require('drizzle-orm/better-sqlite3/migrator');const db=new Database('data/payroll.db');migrate(drizzle(db),{migrationsFolder:'./migrations'})\""
+    "db:generate": "npx drizzle-kit generate --config=drizzle.config.mjs"
   },
   "dependencies": {
-    "better-sqlite3": "^11.8.1",
     "clsx": "^2.1.1",
-    "drizzle-orm": "^0.38.4",
+    "drizzle-orm": "^0.45.2",
     "exceljs": "^4.4.0",
-    "lucide-react": "^0.475.0",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "tailwind-merge": "^3.0.1",
-    "xlsx": "^0.18.5",
-    "zustand": "^5.0.3"
+    "lucide-react": "^1.44.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "sql.js": "^1.14.2",
+    "tailwind-merge": "^3.6.0",
+    "zustand": "^5.0.15"
   },
   "devDependencies": {
-    "@electron/rebuild": "^4.2.0",
-    "@types/better-sqlite3": "^7.6.12",
-    "@types/node": "^22.13.4",
-    "@types/react": "^18.3.18",
-    "@types/react-dom": "^18.3.5",
-    "@vitejs/plugin-react": "^4.3.4",
-    "autoprefixer": "^10.4.20",
-    "concurrently": "^10.0.5",
+    "@tailwindcss/postcss": "^4.3.3",
+    "@types/node": "^24.13.4",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@types/sql.js": "^1.4.11",
+    "@vitejs/plugin-react": "^6.1.1",
     "drizzle-kit": "^0.31.10",
-    "electron": "^33.3.1",
-    "electron-builder": "^25.1.8",
-    "postcss": "^8.5.2",
-    "tailwindcss": "^3.4.17",
-    "typescript": "^5.7.3",
-    "vite": "^6.1.0",
-    "vite-plugin-electron": "^0.29.0",
-    "vite-plugin-electron-renderer": "^0.14.6",
-    "vitest": "^3.0.5"
+    "electron": "44.3.0",
+    "electron-builder": "^26.15.3",
+    "esbuild": "^0.28.2",
+    "postcss": "^8.5.28",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.0",
+    "vite-plugin-electron": "^1.1.2",
+    "vite-plugin-electron-renderer": "^1.0.0",
+    "vitest": "^5.0.0"
+  },
+  "overrides": {
+    "@esbuild-kit/core-utils": {
+      "esbuild": "^0.25.0"
+    }
   }
 }
